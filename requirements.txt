@@ -1,3 +1,4 @@
 requests
 flask
 BeautifulSoup3
+playwright
