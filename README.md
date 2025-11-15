@@ -2,7 +2,7 @@
 # 🪞 Mirrog
 
 **Mirrog** is an open-source, privacy-first **multi-engine search frontend** built with **Flask + Python**.  
-It provides a clean, responsive interface for **DuckDuckGo**, **Startpage** and **Reddit**, complete with modern features like dark mode, pagination, and built-in webpage screenshots powered by Playwright.
+It provides a clean, responsive interface for **DuckDuckGo**, **Startpage**, **Mojeek**, **Wikipedia** and **Reddit**, complete with modern features like dark mode, pagination, and built-in webpage screenshots powered by Playwright.
 
 Every search is anonymized back with a random untracable user agent, if you want to also hide ip addr, you will either have to setup on a remote server, or a VPN, proxy or Tor.
 
