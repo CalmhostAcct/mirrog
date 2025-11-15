@@ -1,4 +1,4 @@
 requests
 flask
-BeautifulSoup3
+BeautifulSoup4
 playwright
