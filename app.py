@@ -48,6 +48,9 @@ HTML_TEMPLATE = """
                 <option value="duck" {% if engine == 'duck' %}selected{% endif %}>🦆 DuckDuckGo</option>
                 <option value="startpage" {% if engine == 'startpage' %}selected{% endif %}>🌟 Startpage</option>
                 <option value="reddit" {% if engine == 'reddit' %}selected{% endif %}>👽 Reddit</option>
+                <option value="mojeek" {% if engine == 'mojeek' %}selected{% endif %}>🦁 Mojeek</option>
+                <option value="wiki" {% if engine == 'wiki' %}selected{% endif %}>📚 Wikipedia</option>
+                <option value="all" {% if engine == 'all' %}selected{% endif %}>🌐 All Engines</option>
             </select>
             <select name="region" class="form-select form-select-sm w-auto">
                 <option value="">🌐 All regions</option>
@@ -81,9 +84,7 @@ HTML_TEMPLATE = """
         <div class="mb-4">
 <p class="text-muted">
     Showing {{ results|length }} results for <strong>{{ query }}</strong> via
-    <strong>
-        {{ 'DuckDuckGo' if engine == 'duck' else ('Startpage' if engine == 'startpage' else 'Reddit') }}
-    </strong>
+    <strong>{{ engine|capitalize }}</strong>
 </p>
         </div>
         {% for r in results %}
@@ -104,6 +105,7 @@ HTML_TEMPLATE = """
                 </div>
             </div>
         {% endfor %}
+
         <div class="text-center d-flex justify-content-between">
             {% if page > 0 %}
                 <a href="?{{ prev_page }}" class="btn btn-outline-secondary">← Previous</a>
@@ -123,20 +125,22 @@ HTML_TEMPLATE = """
 """
 
 # =========================================
-# Scrapers
+# SCRAPERS
 # =========================================
+
+def highlight_terms(text, query):
+    if not text or not query:
+        return text
+    pattern = re.compile(re.escape(query), re.IGNORECASE)
+    return pattern.sub(lambda m: f"<mark>{m.group(0)}</mark>", text)
+
+# =====================
+# DuckDuckGo
+# =====================
 def scrape_duckduckgo(search_query, region="", time="", safe="moderate", site="", start=0, limit=30):
     base_url = "https://html.duckduckgo.com/html/"
     q = f"{search_query} site:{site}" if site else search_query
-
-    params = {
-        "q": q,
-        "kl": region,
-        "df": time,
-        "kp": {"on": -1, "off": 1}.get(safe, 0),
-        "s": start,
-    }
-
+    params = {"q": q, "kl": region, "df": time, "kp": {"on": -1, "off": 1}.get(safe, 0), "s": start}
     response = requests.get(base_url, params=params, headers={"User-Agent": randomize_user_agent()})
     soup = BeautifulSoup(response.text, "html.parser")
 
@@ -144,14 +148,13 @@ def scrape_duckduckgo(search_query, region="", time="", safe="moderate", site=""
     for result in soup.find_all("div", class_="result"):
         title_tag = result.find("a", class_="result__a")
         snippet_tag = result.find("a", class_="result__snippet")
-
         if title_tag:
             title = title_tag.get_text(strip=True)
             link = title_tag.get("href")
             parsed = urlparse(link)
             query = parse_qs(parsed.query)
             if "uddg" in query:
-                link = unquote(query['uddg'][0])
+                link = unquote(query["uddg"][0])
             snippet = snippet_tag.get_text(" ", strip=True) if snippet_tag else ""
             results.append({
                 "title": highlight_terms(title, search_query),
@@ -162,7 +165,9 @@ def scrape_duckduckgo(search_query, region="", time="", safe="moderate", site=""
             break
     return results
 
-
+# =====================
+# Reddit
+# =====================
 def scrape_reddit(search_query, start=0, limit=30):
     base_url = "https://old.reddit.com/search/"
     params = {"q": search_query, "sort": "relevance", "t": "all"}
@@ -189,54 +194,99 @@ def scrape_reddit(search_query, start=0, limit=30):
             break
     return results
 
+
+# =====================
+# Startpage
+# =====================
 def scrape_startpage(search_query, region="", time="", safe="moderate", site="", start=0, limit=30):
     base_url = "https://www.startpage.com/sp/search"
-
     q = f"{search_query} site:{site}" if site else search_query
-
-    params = {
-        "query": q,
-        "cat": "web",
-        "start": start,
-    }
-
+    params = {"query": q, "cat": "web", "start": start}
     headers = {"User-Agent": randomize_user_agent()}
     response = requests.get(base_url, params=params, headers=headers)
     soup = BeautifulSoup(response.text, "html.parser")
 
     results = []
-
-    # Find ALL titles (each is a full result hit)
     for link_tag in soup.select("a.result-title.result-link"):
         url = link_tag.get("href")
-
-        # Title is inside <h2>
         title_tag = link_tag.select_one("h2")
         title = title_tag.get_text(strip=True) if title_tag else ""
-
-        # Snippet is the immediate next <p class="description">
         snippet_tag = link_tag.find_next_sibling("p", class_="description")
         snippet = snippet_tag.get_text(" ", strip=True) if snippet_tag else ""
-
         results.append({
             "title": highlight_terms(title, search_query),
             "url": url,
             "snippet": highlight_terms(snippet, search_query),
         })
-
         if len(results) >= limit:
             break
 
     return results
 
-def highlight_terms(text, query):
-    if not text or not query:
-        return text
-    pattern = re.compile(re.escape(query), re.IGNORECASE)
-    return pattern.sub(lambda m: f"<mark>{m.group(0)}</mark>", text)
+# =====================
+# Mojeek
+# =====================
+# =====================
+def scrape_mojeek(search_query, start=0, limit=30):
+    base_url = f"https://www.mojeek.com/search?q={search_query}&s={start}"
+    headers = {"User-Agent": randomize_user_agent()}
+    response = requests.get(base_url, headers=headers)
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    results = []
+
+    # ================
+    # 2. Main Organic Results
+    # ================
+    for li in soup.select("ul.results-standard > li"):
+        # Title
+        title_tag = li.find("a", class_="title")
+        if not title_tag:
+            continue
+
+        title = highlight_terms(title_tag.get_text(strip=True), search_query)
+        url = title_tag.get("href")
+
+        # Snippet
+        snippet_tag = li.find("p", class_="s")
+        snippet = highlight_terms(
+            snippet_tag.get_text(" ", strip=True) if snippet_tag else "",
+            search_query
+        )
+
+        results.append({"title": title, "url": url, "snippet": snippet})
+
+        if len(results) >= limit:
+            break
+
+    return results[:limit]
+
+
+
+
+# =====================
+# Wikipedia
+# =====================
+def scrape_wikipedia(search_query, limit=30):
+    api = "https://en.wikipedia.org/w/api.php"
+    params = {"action": "query", "list": "search", "format": "json", "srsearch": search_query}
+    response = requests.get(api, params=params, headers={"User-Agent": randomize_user_agent()}).json()
+
+    results = []
+    for item in response["query"]["search"][:limit]:
+        title = item["title"]
+        snippet = re.sub("<.*?>", "", item["snippet"])
+        page_url = f"https://en.wikipedia.org/wiki/{title.replace(' ', '_')}"
+        results.append({
+            "title": highlight_terms(title, search_query),
+            "url": page_url,
+            "snippet": highlight_terms(snippet, search_query)
+        })
+
+    return results
 
 # =========================================
-# Routes
+# ROUTES
 # =========================================
 @app.route("/", methods=["GET"])
 def index():
@@ -260,6 +310,19 @@ def index():
             results = scrape_startpage(query, region, time, safe, site, start, limit)
         elif engine == "duck":
             results = scrape_duckduckgo(query, region, time, safe, site, start, limit)
+        elif engine == "mojeek":
+            results = scrape_mojeek(query, start, limit)
+        elif engine == "wiki":
+            results = scrape_wikipedia(query, limit)
+        elif engine == "all":
+            combined = []
+            combined.extend(scrape_duckduckgo(query, region, time, safe, site, start, limit))
+            combined.extend(scrape_startpage(query, region, time, safe, site, start, limit))
+            combined.extend(scrape_reddit(query, start, limit))
+            combined.extend(scrape_mojeek(query, start, limit))
+            combined.extend(scrape_wikipedia(query, limit))
+
+            results = combined[:limit]
 
     next_page_params = request.args.to_dict()
     next_page_params["page"] = page + 1
@@ -286,7 +349,6 @@ def index():
         limit=limit
     )
 
-
 @app.route("/screenshot")
 def screenshot():
     url = request.args.get("url")
@@ -302,7 +364,6 @@ def screenshot():
         browser.close()
 
     return send_file(io.BytesIO(screenshot_bytes), mimetype="image/png")
-
 
 if __name__ == "__main__":
     app.run(debug=True)
