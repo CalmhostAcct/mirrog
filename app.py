@@ -5,8 +5,15 @@ from urllib.parse import urlparse, parse_qs, unquote, urlencode
 import re
 import io
 from playwright.sync_api import sync_playwright
-
+import random
+import string
 app = Flask(__name__)
+
+def randomize_user_agent():
+    letters = ''.join(random.choice(string.ascii_letters) for _ in range (8))
+    decimal_number = round(random.uniform(0, 100), 3)
+    rand_user_agent = f"Mozilla/2.0 {letters}/{decimal_number}"
+    return rand_user_agent
 
 # ===============================
 # HTML TEMPLATE WITH BOOTSTRAP 5
@@ -39,6 +46,7 @@ HTML_TEMPLATE = """
         <div class="d-flex gap-2 flex-wrap">
             <select name="engine" class="form-select form-select-sm w-auto">
                 <option value="duck" {% if engine == 'duck' %}selected{% endif %}>🦆 DuckDuckGo</option>
+                <option value="startpage" {% if engine == 'startpage' %}selected{% endif %}>🌟 Startpage</option>
                 <option value="reddit" {% if engine == 'reddit' %}selected{% endif %}>👽 Reddit</option>
             </select>
             <select name="region" class="form-select form-select-sm w-auto">
@@ -71,7 +79,12 @@ HTML_TEMPLATE = """
 
     {% if results %}
         <div class="mb-4">
-            <p class="text-muted">Showing {{ results|length }} results for <strong>{{ query }}</strong> via <strong>{{ 'DuckDuckGo' if engine == 'duck' else 'Reddit' }}</strong></p>
+<p class="text-muted">
+    Showing {{ results|length }} results for <strong>{{ query }}</strong> via
+    <strong>
+        {{ 'DuckDuckGo' if engine == 'duck' else ('Startpage' if engine == 'startpage' else 'Reddit') }}
+    </strong>
+</p>
         </div>
         {% for r in results %}
             <div class="card mb-3 shadow-sm">
@@ -124,7 +137,7 @@ def scrape_duckduckgo(search_query, region="", time="", safe="moderate", site=""
         "s": start,
     }
 
-    response = requests.get(base_url, params=params, headers={"User-Agent": "Mozilla/5.0"})
+    response = requests.get(base_url, params=params, headers={"User-Agent": randomize_user_agent()})
     soup = BeautifulSoup(response.text, "html.parser")
 
     results = []
@@ -153,7 +166,7 @@ def scrape_duckduckgo(search_query, region="", time="", safe="moderate", site=""
 def scrape_reddit(search_query, start=0, limit=30):
     base_url = "https://old.reddit.com/search/"
     params = {"q": search_query, "sort": "relevance", "t": "all"}
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {"User-Agent": randomize_user_agent()}
     response = requests.get(base_url, params=params, headers=headers)
     soup = BeautifulSoup(response.text, "html.parser")
 
@@ -176,6 +189,45 @@ def scrape_reddit(search_query, start=0, limit=30):
             break
     return results
 
+def scrape_startpage(search_query, region="", time="", safe="moderate", site="", start=0, limit=30):
+    base_url = "https://www.startpage.com/sp/search"
+
+    q = f"{search_query} site:{site}" if site else search_query
+
+    params = {
+        "query": q,
+        "cat": "web",
+        "start": start,
+    }
+
+    headers = {"User-Agent": randomize_user_agent()}
+    response = requests.get(base_url, params=params, headers=headers)
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    results = []
+
+    # Find ALL titles (each is a full result hit)
+    for link_tag in soup.select("a.result-title.result-link"):
+        url = link_tag.get("href")
+
+        # Title is inside <h2>
+        title_tag = link_tag.select_one("h2")
+        title = title_tag.get_text(strip=True) if title_tag else ""
+
+        # Snippet is the immediate next <p class="description">
+        snippet_tag = link_tag.find_next_sibling("p", class_="description")
+        snippet = snippet_tag.get_text(" ", strip=True) if snippet_tag else ""
+
+        results.append({
+            "title": highlight_terms(title, search_query),
+            "url": url,
+            "snippet": highlight_terms(snippet, search_query),
+        })
+
+        if len(results) >= limit:
+            break
+
+    return results
 
 def highlight_terms(text, query):
     if not text or not query:
@@ -200,10 +252,13 @@ def index():
     start = page * limit
 
     results = None
+
     if query:
         if engine == "reddit":
             results = scrape_reddit(query, start, limit)
-        else:
+        elif engine == "startpage":
+            results = scrape_startpage(query, region, time, safe, site, start, limit)
+        elif engine == "duck":
             results = scrape_duckduckgo(query, region, time, safe, site, start, limit)
 
     next_page_params = request.args.to_dict()
